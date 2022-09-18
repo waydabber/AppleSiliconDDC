@@ -8,18 +8,26 @@ import Foundation
 import IOKit
 
 class AppleSiliconDDC: NSObject {
+  public struct IOregService {
+    var edidUUID: String = ""
+    var manufacturerID: String = ""
+    var productName: String = ""
+    var serialNumber: Int64 = 0
+    var location: String = ""
+    var transportUpstream: String = ""
+    var transportDownstream: String = ""
+    var service: IOAVService?
+    var serviceLocation: Int = 0
+  }
+
   public struct DisplayService {
     var displayID: CGDirectDisplayID = 0
     var service: IOAVService?
     var serviceLocation: Int = 0
     var isDiscouraged: Bool = false
+    var isDummy: Bool = false
+    var serviceDetails: IOregService
   }
-
-  #if arch(arm64)
-    public static let isArm64: Bool = true
-  #else
-    public static let isArm64: Bool = false
-  #endif
 
   // This matches Displays to the right IOAVService
   public static func getServiceMatches(displayIDs: [CGDirectDisplayID]) -> [DisplayService] {
@@ -30,7 +38,8 @@ class AppleSiliconDDC: NSObject {
       for ioregServiceForMatching in ioregServicesForMatching {
         let score = self.ioregMatchScore(displayID: displayID, ioregEdidUUID: ioregServiceForMatching.edidUUID, ioregProductName: ioregServiceForMatching.productName, ioregSerialNumber: ioregServiceForMatching.serialNumber, serviceLocation: ioregServiceForMatching.serviceLocation)
         let isDiscouraged = self.checkIfDiscouraged(ioregService: ioregServiceForMatching)
-        let displayService = DisplayService(displayID: displayID, service: ioregServiceForMatching.service, serviceLocation: ioregServiceForMatching.serviceLocation, isDiscouraged: isDiscouraged)
+        let isDummy = self.checkIfDummy(ioregService: ioregServiceForMatching)
+        let displayService = DisplayService(displayID: displayID, service: ioregServiceForMatching.service, serviceLocation: ioregServiceForMatching.serviceLocation, isDiscouraged: isDiscouraged, isDummy: isDummy, serviceDetails: ioregServiceForMatching)
         if scoredCandidateDisplayServices[score] == nil {
           scoredCandidateDisplayServices[score] = []
         }
@@ -54,11 +63,11 @@ class AppleSiliconDDC: NSObject {
   }
 
   // Perform DDC read
-  public static func read(service: IOAVService?, command: UInt8, tries: UInt8 = 3, minReplyDelay: UInt32 = 10000) -> (current: UInt16, max: UInt16)? {
+  public static func read(service: IOAVService?, command: UInt8, writeSleepTime: UInt32? = nil, numofWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> (current: UInt16, max: UInt16)? {
     var values: (UInt16, UInt16)?
     var send: [UInt8] = [command]
     var reply = [UInt8](repeating: 0, count: 11)
-    if Arm64DDC.performDDCCommunication(service: service, send: &send, reply: &reply, readSleepTime: minReplyDelay, numOfRetryAttemps: tries) {
+    if Self.performDDCCommunication(service: service, send: &send, reply: &reply, writeSleepTime: writeSleepTime, numofWriteCycles: numofWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime) {
       let max = UInt16(reply[6]) * 256 + UInt16(reply[7])
       let current = UInt16(reply[8]) * 256 + UInt16(reply[9])
       values = (current, max)
@@ -69,29 +78,29 @@ class AppleSiliconDDC: NSObject {
   }
 
   // Perform DDC write
-  public static func write(service: IOAVService?, command: UInt8, value: UInt16) -> Bool {
+  public static func write(service: IOAVService?, command: UInt8, value: UInt16, writeSleepTime: UInt32? = nil, numofWriteCycles: UInt8? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> Bool {
     var send: [UInt8] = [command, UInt8(value >> 8), UInt8(value & 255)]
     var reply: [UInt8] = []
-    return Arm64DDC.performDDCCommunication(service: service, send: &send, reply: &reply)
+    return Self.performDDCCommunication(service: service, send: &send, reply: &reply, writeSleepTime: writeSleepTime, numofWriteCycles: numofWriteCycles, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime)
   }
 
   // Performs DDC read or write
-  public static func performDDCCommunication(service: IOAVService?, send: inout [UInt8], reply: inout [UInt8], writeSleepTime: UInt32 = 10000, numofWriteCycles: UInt8 = 2, readSleepTime: UInt32 = 10000, numOfRetryAttemps: UInt8 = 3, retrySleepTime: UInt32 = 20000) -> Bool {
+  public static func performDDCCommunication(service: IOAVService?, send: inout [UInt8], reply: inout [UInt8], writeSleepTime: UInt32? = nil, numofWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> Bool {
     var success: Bool = false
     guard service != nil else {
       return success
     }
     var checkedsend: [UInt8] = [UInt8(0x80 | (send.count + 1)), UInt8(send.count)] + send + [0]
     checkedsend[checkedsend.count - 1] = self.checksum(chk: send.count == 1 ? 0x6E : 0x6E ^ 0x51, data: &checkedsend, start: 0, end: checkedsend.count - 2)
-    for _ in 1 ... numOfRetryAttemps {
-      for _ in 1 ... numofWriteCycles {
-        usleep(writeSleepTime)
+    for _ in 1 ... (numOfRetryAttemps ?? 4) + 1 {
+      for _ in 1 ... (numofWriteCycles ?? 2) + 0 {
+        usleep(writeSleepTime ?? 10000)
         if IOAVServiceWriteI2C(service, 0x37, 0x51, &checkedsend, UInt32(checkedsend.count)) == 0 {
           success = true
         }
       }
       if reply.count > 0 {
-        usleep(readSleepTime)
+        usleep(readSleepTime ?? 10000)
         if IOAVServiceReadI2C(service, 0x37, 0x51, &reply, UInt32(reply.count)) == 0 {
           if self.checksum(chk: 0x50, data: &reply, start: 0, end: reply.count - 2) == reply[reply.count - 1] {
             success = true
@@ -103,24 +112,12 @@ class AppleSiliconDDC: NSObject {
       if success {
         return success
       }
-      usleep(retrySleepTime)
+      usleep(retrySleepTime ?? 20000)
     }
     return success
   }
 
   // -------
-
-  private struct IOregService {
-    var edidUUID: String = ""
-    var manufacturerID: String = ""
-    var productName: String = ""
-    var serialNumber: Int64 = 0
-    var location: String = ""
-    var transportUpstream: String = ""
-    var transportDownstream: String = ""
-    var service: IOAVService?
-    var serviceLocation: Int = 0
-  }
 
   private static let MAX_MATCH_SCORE: Int = 13
 
@@ -201,10 +198,10 @@ class AppleSiliconDDC: NSObject {
   // Returns EDID UUDI, Product Name and Serial Number in an IOregService if it is found using the provided io_service_t pointing to a AppleCDC2 item in the ioreg tree
   private static func getIORegServiceAppleCDC2Properties(service: io_service_t) -> IOregService {
     var ioregService = IOregService()
-    if let unmanagedEdidUUID = IORegistryEntryCreateCFProperty(service, CFStringCreateWithCString(kCFAllocatorDefault, "EDID UUID", kCFStringEncodingASCII), kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let edidUUID = unmanagedEdidUUID.takeRetainedValue() as? String {
+    if let unmanagedEdidUUID = IORegistryEntryCreateCFProperty(service, "EDID UUID" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let edidUUID = unmanagedEdidUUID.takeRetainedValue() as? String {
       ioregService.edidUUID = edidUUID
     }
-    if let unmanagedDisplayAttrs = IORegistryEntryCreateCFProperty(service, CFStringCreateWithCString(kCFAllocatorDefault, "DisplayAttributes", kCFStringEncodingASCII), kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let displayAttrs = unmanagedDisplayAttrs.takeRetainedValue() as? NSDictionary, let productAttrs = displayAttrs.value(forKey: "ProductAttributes") as? NSDictionary {
+    if let unmanagedDisplayAttrs = IORegistryEntryCreateCFProperty(service, "DisplayAttributes" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let displayAttrs = unmanagedDisplayAttrs.takeRetainedValue() as? NSDictionary, let productAttrs = displayAttrs.value(forKey: "ProductAttributes") as? NSDictionary {
       if let manufacturerID = productAttrs.value(forKey: "ManufacturerID") as? String {
         ioregService.manufacturerID = manufacturerID
       }
@@ -215,7 +212,7 @@ class AppleSiliconDDC: NSObject {
         ioregService.serialNumber = serialNumber
       }
     }
-    if let unmanagedTransport = IORegistryEntryCreateCFProperty(service, CFStringCreateWithCString(kCFAllocatorDefault, "Transport", kCFStringEncodingASCII), kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let transport = unmanagedTransport.takeRetainedValue() as? NSDictionary {
+    if let unmanagedTransport = IORegistryEntryCreateCFProperty(service, "Transport" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let transport = unmanagedTransport.takeRetainedValue() as? NSDictionary {
       if let upstream = transport.value(forKey: "Upstream") as? String {
         ioregService.transportUpstream = upstream
       }
@@ -228,7 +225,7 @@ class AppleSiliconDDC: NSObject {
 
   // Sets up the service in an IOregService if it is found using the provided io_service_t pointing to a DCPAVServiceProxy item in the ioreg tree
   private static func setIORegServiceDCPAVServiceProxy(service: io_service_t, ioregService: inout IOregService) {
-    if let unmanagedLocation = IORegistryEntryCreateCFProperty(service, CFStringCreateWithCString(kCFAllocatorDefault, "Location", kCFStringEncodingASCII), kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let location = unmanagedLocation.takeRetainedValue() as? String {
+    if let unmanagedLocation = IORegistryEntryCreateCFProperty(service, "Location" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let location = unmanagedLocation.takeRetainedValue() as? String {
       ioregService.location = location
       if location == "External" {
         ioregService.service = IOAVServiceCreateWithService(kCFAllocatorDefault, service)?.takeRetainedValue() as IOAVService
@@ -241,7 +238,13 @@ class AppleSiliconDDC: NSObject {
     var serviceLocation: Int = 0
     var ioregServicesForMatching: [IOregService] = []
     let ioregRoot: io_registry_entry_t = IORegistryGetRootEntry(kIOMasterPortDefault)
+    defer {
+      IOObjectRelease(ioregRoot)
+    }
     var iterator = io_iterator_t()
+    defer {
+      IOObjectRelease(iterator)
+    }
     var ioregService = IOregService()
     guard IORegistryEntryCreateIterator(ioregRoot, "IOService", IOOptionBits(kIORegistryIterateRecursively), &iterator) == KERN_SUCCESS else {
       return ioregServicesForMatching
@@ -264,25 +267,18 @@ class AppleSiliconDDC: NSObject {
     return ioregServicesForMatching
   }
 
-  // Check if it is problematic to enable DDC on the display
-  private static func checkIfDiscouraged(ioregService: IOregService) -> Bool {
-    var modelIdentifier: String = ""
-    let platformExpertDevice = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
-    if let modelData = IORegistryEntryCreateCFProperty(platformExpertDevice, "model" as CFString, kCFAllocatorDefault, 0).takeRetainedValue() as? Data, let modelIdentifierCString = String(data: modelData, encoding: .utf8)?.cString(using: .utf8) {
-      modelIdentifier = String(cString: modelIdentifierCString)
-    }
-    // This is a well known dummy plug (not a real display) but it breaks DDC communication on M1
+  // Check if display is a dummy
+  private static func checkIfDummy(ioregService: IOregService) -> Bool {
+    // This is a well known dummy plug
     if ioregService.manufacturerID == "AOC", ioregService.productName == "28E850" {
       return true
     }
-    // If the display contains the string "Dummy", then it is highly suspicious
-    if ioregService.productName.contains("Dummy") || ioregService.productName.contains("dummy") {
-      return true
-    }
-    // First service location of Mac Mini HDMI is broken for DDC communication
-    if ioregService.transportDownstream == "HDMI", ioregService.serviceLocation == 1, modelIdentifier == "Macmini9,1" {
-      return true
-    }
     return false
+  }
+
+  // Check if it is problematic to enable DDC on the display
+  private static func checkIfDiscouraged(ioregService _: IOregService) -> Bool {
+    // This will need a rework to take into account all M1 machines with the problematic HDMI-DP chip.
+    false
   }
 }
