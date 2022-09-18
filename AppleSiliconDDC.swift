@@ -278,7 +278,7 @@ class AppleSiliconDDC: NSObject {
 
   // Check if it is problematic to enable DDC on the display
   private static func checkIfDiscouraged(ioregService _: IOregService) -> Bool {
-    // This will need a rework to take into account all M1 machines with the problematic HDMI-DP chip.
+    // This will need a rework to take into account all Apple Silicon machines with the problematic HDMI-DP chip while somehow allowing legit HDMI dongles.
     false
   }
 }
