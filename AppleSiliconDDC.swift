@@ -1,4 +1,4 @@
-//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
+//  Copyright © @waydabber
 
 import Foundation
 import IOKit
