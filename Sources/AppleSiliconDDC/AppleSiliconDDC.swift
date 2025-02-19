@@ -1,12 +1,13 @@
 //  Copyright © @waydabber
 
+import AppleSiliconDDCObjC
 import Foundation
 import IOKit
 
 let ARM64_DDC_7BIT_ADDRESS: UInt8 = 0x37 // This works with DisplayPort devices
 let ARM64_DDC_DATA_ADDRESS: UInt8 = 0x51
 
-class AppleSiliconDDC: NSObject {
+public class AppleSiliconDDC: NSObject {
   #if arch(arm64)
     public static let isArm64: Bool = true
   #else
@@ -14,22 +15,22 @@ class AppleSiliconDDC: NSObject {
   #endif
   static let MAX_MATCH_SCORE: Int = 20
 
-  struct IOregService {
-    var edidUUID: String = ""
-    var manufacturerID: String = ""
-    var productName: String = ""
-    var serialNumber: Int64 = 0
-    var alphanumericSerialNumber: String = ""
-    var location: String = ""
-    var ioDisplayLocation: String = ""
-    var transportUpstream: String = ""
-    var transportDownstream: String = ""
-    var service: IOAVService?
-    var serviceLocation: Int = 0
-    var displayAttributes: NSDictionary?
+  public struct IOregService {
+    public var edidUUID: String = ""
+    public var manufacturerID: String = ""
+    public var productName: String = ""
+    public var serialNumber: Int64 = 0
+    public var alphanumericSerialNumber: String = ""
+    public var location: String = ""
+    public var ioDisplayLocation: String = ""
+    public var transportUpstream: String = ""
+    public var transportDownstream: String = ""
+    public var service: IOAVService?
+    public var serviceLocation: Int = 0
+    public var displayAttributes: NSDictionary?
   }
 
-  struct Arm64Service {
+  public struct Arm64Service {
     var displayID: CGDirectDisplayID = 0
     var service: IOAVService?
     var serviceLocation: Int = 0
@@ -69,7 +70,7 @@ class AppleSiliconDDC: NSObject {
     return matchedDisplayServices
   }
 
-  static func read(service: IOAVService?, command: UInt8, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> (current: UInt16, max: UInt16)? {
+  static public func read(service: IOAVService?, command: UInt8, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, readSleepTime: UInt32? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> (current: UInt16, max: UInt16)? {
     var values: (UInt16, UInt16)?
     var send: [UInt8] = [command]
     var reply = [UInt8](repeating: 0, count: 11)
@@ -83,7 +84,7 @@ class AppleSiliconDDC: NSObject {
     return values
   }
 
-  static func write(service: IOAVService?, command: UInt8, value: UInt16, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> Bool {
+  static public func write(service: IOAVService?, command: UInt8, value: UInt16, writeSleepTime: UInt32? = nil, numOfWriteCycles: UInt8? = nil, numOfRetryAttemps: UInt8? = nil, retrySleepTime: UInt32? = nil) -> Bool {
     var send: [UInt8] = [command, UInt8(value >> 8), UInt8(value & 255)]
     var reply: [UInt8] = []
     return Self.performDDCCommunication(service: service, send: &send, reply: &reply, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime)
@@ -229,7 +230,7 @@ class AppleSiliconDDC: NSObject {
     }
   }
 
-  static func getIoregServicesForMatching() -> [IOregService] {
+  static public func getIoregServicesForMatching() -> [IOregService] {
     var serviceLocation = 0
     var ioregServicesForMatching: [IOregService] = []
     let ioregRoot: io_registry_entry_t = IORegistryGetRootEntry(kIOMasterPortDefault)

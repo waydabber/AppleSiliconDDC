@@ -1,0 +1,4 @@
+module AppleSiliconDDCObjC {
+    header "Bridging-Header.h"
+    export *
+}
